@@ -37,7 +37,7 @@ DATASET_BASE_DIR = "dataset"
 DATASET_CATEGORIES = ["single_point", "multi_point", "random_pixels", "large_area", "gaussian_gradient"]
 
 # b) 训练相关参数
-EPOCHS = 100
+EPOCHS = 10000
 BATCH_SIZE = 64
 VALIDATION_SPLIT = 0.2
 LEARNING_RATE = 0.001
