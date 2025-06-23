@@ -1,10 +1,11 @@
 # -----------------------------------------------------------------------------
 # 数据集生成脚本: 随机像素点 (create_dataset_random_pixels.py)
 # 
+# 【v12 核心集成版】
 # 功能:
 # 1. 生成指定数量的样本。
 # 2. 对每个样本，在12x12的电导率图上，随机选择N个点，并为每个点赋予随机的电导率值。
-# 3. 对每个生成的电导率分布图(Y)，调用有限元求解器计算出对应的15维电阻向量(X)。
+# 3. 对每个生成的电导率分布图(Y)，调用已验证的有限元求解器计算出对应的15维电阻向量(X)。
 # 4. 将所有生成的 (X, Y) 数据对，分别保存到 X_data.npy 和 Y_data.npy 文件中。
 #
 # 使用方法:
@@ -23,7 +24,6 @@ import tqdm  # 引入 tqdm 来显示进度条
 # 显式地从 skfem 的不同模块中导入所有需要的类和函数
 from skfem import (MeshHex, ElementHex1, Basis)
 from skfem.assembly import asm, BilinearForm
-# 针对 v11.0.0, solve 位于 utils
 from skfem.utils import solve
 from skfem.helpers import dot, grad
 from scipy.sparse.linalg import spsolve
@@ -62,6 +62,13 @@ TOTAL_ELEMENTS = NX * NY * NZ
 # --- 2. 核心函数定义 ---
 # =============================================================================
 
+@BilinearForm
+def stiffness(u, v, w):
+    """
+    一个通用的“配方”，它期望通过关键字参数 'sigma' 接收电导率。
+    """
+    return w.sigma * dot(grad(u), grad(v))
+
 def create_random_pixel_map():
     """
     生成一个具有随机数量、随机位置、随机幅值的高电导率点的电导率图。
@@ -77,7 +84,6 @@ def create_random_pixel_map():
     num_hot_pixels = np.random.randint(NUM_HOT_PIXELS_RANGE[0], NUM_HOT_PIXELS_RANGE[1] + 1)
     
     # c. 从144个位置中，无放回地随机抽取 num_hot_pixels 个位置的索引
-    # 我们假设压力只作用于最顶层 (k = NZ - 1)，所以只在0-143的索引中选择
     hot_pixel_indices = np.random.choice(TOTAL_ELEMENTS, size=num_hot_pixels, replace=False)
     
     # d. 为每一个被选中的“热点”像素，独立地赋予一个随机的高电导率值
@@ -89,12 +95,31 @@ def create_random_pixel_map():
     return conductivity_map
 
 
-def solve_fem_for_map(stiffness_form, basis, electrode_nodes):
+def solve_fem_for_map(conductivity_map, basis, electrode_nodes):
     """
-    对于一个给定的电导率分布 (已包含在 stiffness_form 中), 
-    计算出其对应的15维电阻测量向量。
+    【v12 核心逻辑 - 优化版】
+    对于一个给定的电导率分布, 计算出其对应的15维电阻测量向量。
     """
-    A = asm(stiffness_form, basis)
+    # 1. 初始化一个大小与节点数量(basis.N)相同的数组，用于存储每个节点的电导率。
+    min_conductivity = np.min(conductivity_map)
+    nodal_conductivity = np.full(basis.N, min_conductivity, dtype=np.float64)
+
+    # 2. 遍历所有单元，将其电导率值“传播”给其构成节点。
+    #    如果一个节点被多个不同电导率的单元共享，它会取最大值。
+    for i in range(TOTAL_ELEMENTS):
+        nodes_of_element = basis.mesh.t[:, i]
+        current_conductivity = conductivity_map[i]
+        # 更新这些节点上的电导率，只有在遇到更大的值时才更新
+        nodal_conductivity[nodes_of_element] = np.maximum(
+            nodal_conductivity[nodes_of_element], 
+            current_conductivity
+        )
+    
+    # 3. 在 P1 基上，使用这个新的逐节点数组来创建一个与电势场完全兼容的电导率场。
+    sigma_field = basis.interpolate(nodal_conductivity)
+
+    # 4. 在调用 asm 时，将这个兼容的 DiscreteField 对象作为参数传递。
+    A = asm(stiffness, basis, sigma=sigma_field)
     
     resistance_vector = []
     for drive_tag, ground_tag in MEASUREMENT_PAIRS:
@@ -153,16 +178,10 @@ if __name__ == "__main__":
         # i. 生成一个随机的电导率图 (Ground Truth Y)
         conductivity_map = create_random_pixel_map()
         
-        # ii. 定义一个与此图绑定的刚度矩阵“配方”
-        @BilinearForm
-        def stiffness(u, v, w):
-            sigma = conductivity_map[w.idx]
-            return sigma * dot(grad(u), grad(v))
+        # ii. 调用求解器，计算对应的电阻向量 (Input X)
+        resistance_vector = solve_fem_for_map(conductivity_map, basis, electrode_nodes)
         
-        # iii. 调用求解器，计算对应的电阻向量 (Input X)
-        resistance_vector = solve_fem_for_map(stiffness, basis, electrode_nodes)
-        
-        # iv. 将这对数据 (X, Y) 追加到列表中
+        # iii. 将这对数据 (X, Y) 追加到列表中
         X_data_list.append(resistance_vector)
         Y_data_list.append(conductivity_map)
 
@@ -182,3 +201,4 @@ if __name__ == "__main__":
     print(f"数据集保存成功！")
     print(f"  - 输入数据 (X): {X_data.shape} -> 已保存至 {x_path}")
     print(f"  - 标签数据 (Y): {Y_data.shape} -> 已保存至 {y_path}")
+

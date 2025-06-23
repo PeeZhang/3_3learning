@@ -1,10 +1,11 @@
 # -----------------------------------------------------------------------------
 # 数据集生成脚本: 高斯梯度压力 (create_dataset_gaussian_gradient.py)
 # 
+# 【v12 核心集成版】
 # 功能:
 # 1. 生成指定数量的样本。
 # 2. 对每个样本，通过二维高斯函数生成一个中心强、四周弱的平滑电导率分布。
-# 3. 对每个生成的电导率分布图(Y)，调用有限元求解器计算出对应的15维电阻向量(X)。
+# 3. 对每个生成的电导率分布图(Y)，调用已验证的有限元求解器计算出对应的15维电阻向量(X)。
 # 4. 将所有生成的 (X, Y) 数据对，分别保存到 X_data.npy 和 Y_data.npy 文件中。
 #
 # 使用方法:
@@ -22,7 +23,6 @@ import tqdm  # 引入 tqdm 来显示进度条
 # 显式地从 skfem 的不同模块中导入所有需要的类和函数
 from skfem import (MeshHex, ElementHex1, Basis)
 from skfem.assembly import asm, BilinearForm
-# 针对 v11.0.0, solve 位于 utils
 from skfem.utils import solve
 from skfem.helpers import dot, grad
 from scipy.sparse.linalg import spsolve
@@ -37,7 +37,7 @@ TOTAL_SAMPLES_TO_GENERATE = 1000 # 您期望生成的样本总数
 
 # 【新】定义高斯分布的参数范围
 GAUSSIAN_RADIUS_RANGE = (8.0, 20.0) # 高斯函数的影响半径 (标准差)
-PEAK_CONDUCTIVITY_RATIO_RANGE = (5.0, 25.0) # 压力中心的峰值电导率是背景的5到25倍
+PEAK_CONDUCTIVITY_RATIO_RANGE = (2.0, 20.0) # 压力中心的峰值电导率是背景的2到20倍
 
 # b) 物理模型和有限元模型参数 (与之前保持一致)
 BASE_CONDUCTIVITY = 1.0
@@ -60,6 +60,13 @@ TOTAL_ELEMENTS = NX * NY * NZ
 # =============================================================================
 # --- 2. 核心函数定义 ---
 # =============================================================================
+
+@BilinearForm
+def stiffness(u, v, w):
+    """
+    一个通用的“配方”，它期望通过关键字参数 'sigma' 接收电导率。
+    """
+    return w.sigma * dot(grad(u), grad(v))
 
 def create_gaussian_gradient_map(element_midpoints):
     """
@@ -97,11 +104,34 @@ def create_gaussian_gradient_map(element_midpoints):
     return conductivity_map
 
 
-def solve_fem_for_map(stiffness_form, basis, electrode_nodes):
+def solve_fem_for_map(conductivity_map, basis, electrode_nodes):
     """
-    对于一个给定的电导率分布，计算出其对应的15维电阻测量向量。
+    【v12 核心逻辑】
+    对于一个给定的电导率分布, 计算出其对应的15维电阻测量向量。
     """
-    A = asm(stiffness_form, basis)
+    # 1. 初始化一个大小与节点数量(basis.N)相同的数组，用于存储每个节点的电导率。
+    #    基础值现在根据 conductivity_map 中的最小值来设定，以适应高斯分布
+    base_value = np.min(conductivity_map)
+    nodal_conductivity = np.full(basis.N, base_value, dtype=np.float64)
+
+    # 2. 对于高斯情况，我们不能简单地用一个阈值来判断。
+    #    我们将所有单元的电导率值都映射到其对应的节点上。
+    #    这里采用一种简单但有效的方法：将单元的值赋给其所有节点，
+    #    如果一个节点被多个单元共享，它最终会取到它接触的单元中的最大值。
+    for i in range(TOTAL_ELEMENTS):
+        nodes_of_element = basis.mesh.t[:, i]
+        current_conductivity = conductivity_map[i]
+        # 更新这些节点上的电导率，只有在遇到更大的值时才更新
+        nodal_conductivity[nodes_of_element] = np.maximum(
+            nodal_conductivity[nodes_of_element], 
+            current_conductivity
+        )
+    
+    # 3. 在 P1 基上，使用这个新的逐节点数组来创建一个与电势场完全兼容的电导率场。
+    sigma_field = basis.interpolate(nodal_conductivity)
+
+    # 4. 在调用 asm 时，将这个兼容的 DiscreteField 对象作为参数传递。
+    A = asm(stiffness, basis, sigma=sigma_field)
     
     resistance_vector = []
     for drive_tag, ground_tag in MEASUREMENT_PAIRS:
@@ -162,16 +192,10 @@ if __name__ == "__main__":
         # i. 生成一个随机的电导率图 (Y)
         conductivity_map = create_gaussian_gradient_map(element_midpoints)
         
-        # ii. 定义一个与此图绑定的刚度矩阵“配方”
-        @BilinearForm
-        def stiffness(u, v, w):
-            sigma = conductivity_map[w.idx]
-            return sigma * dot(grad(u), grad(v))
+        # ii. 调用求解器，计算对应的电阻向量 (X)
+        resistance_vector = solve_fem_for_map(conductivity_map, basis, electrode_nodes)
         
-        # iii. 调用求解器，计算对应的电阻向量 (X)
-        resistance_vector = solve_fem_for_map(stiffness, basis, electrode_nodes)
-        
-        # iv. 将这对数据 (X, Y) 追加到列表中
+        # iii. 将这对数据 (X, Y) 追加到列表中
         X_data_list.append(resistance_vector)
         Y_data_list.append(conductivity_map)
 
@@ -191,3 +215,4 @@ if __name__ == "__main__":
     print(f"数据集保存成功！")
     print(f"  - 输入数据 (X): {X_data.shape} -> 已保存至 {x_path}")
     print(f"  - 标签数据 (Y): {Y_data.shape} -> 已保存至 {y_path}")
+

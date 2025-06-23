@@ -1,36 +1,35 @@
 # -----------------------------------------------------------------------------
-# 神经网络模型定义 (model.py - PyTorch版)
+# 神经网络模型定义 (model.py - 文献复现版)
 #
 # 功能:
-# 1. 使用 PyTorch 定义一个全连接神经网络 (MLP) 模型。
-# 2. 模型的输入维度是15 (对应15个电阻测量值)。
-# 3. 模型的输出维度是144 (对应12x12的电导率图)。
+# 1. 使用 PyTorch 定义一个与文献描述完全一致的全连接网络 (FCN)。
+# 2. 结构: 输入层 -> 隐藏层1(1024, ReLU) -> 隐藏层2(1024, ReLU) -> Dropout(0.2) -> 输出层
 # -----------------------------------------------------------------------------
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class MLPModel(nn.Module):
+class FCNModel(nn.Module):
     """
-    一个继承自 torch.nn.Module 的全连接神经网络模型。
+    一个复现自文献的全连接神经网络模型。
     """
-    def __init__(self, input_dim=15, output_dim=144):
+    def __init__(self, input_dim=15, output_dim=144, dropout_rate=0.2):
         """
         在构造函数中定义模型的各个层。
         
         Args:
             input_dim (int): 输入向量的维度。
             output_dim (int): 输出向量的维度。
+            dropout_rate (float): Dropout层的丢弃比率。
         """
-        super(MLPModel, self).__init__()
+        super(FCNModel, self).__init__()
         
         # 定义网络层
-        self.fc1 = nn.Linear(input_dim, 256)
-        self.fc2 = nn.Linear(256, 512)
-        self.fc3 = nn.Linear(512, 1024)
-        # 输出层
-        self.fc4 = nn.Linear(1024, output_dim)
+        self.fc1 = nn.Linear(input_dim, 1024)   # 第一个隐藏层
+        self.fc2 = nn.Linear(1024, 1024)  # 第二个隐藏层
+        self.dropout = nn.Dropout(p=dropout_rate) # Dropout层
+        self.fc3 = nn.Linear(1024, output_dim)    # 输出层
 
     def forward(self, x):
         """
@@ -45,20 +44,22 @@ class MLPModel(nn.Module):
         # 通过隐藏层并应用 ReLU 激活函数
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        
+        # 在进入输出层前，应用 Dropout
+        x = self.dropout(x)
         
         # 输出层不使用激活函数 (线性输出)
-        x = self.fc4(x)
+        x = self.fc3(x)
         
         return x
 
 if __name__ == '__main__':
     # 这个部分可以用来快速测试模型结构是否正确
     # 创建一个模型实例
-    model = MLPModel()
+    model = FCNModel()
     
     # 打印模型结构
-    print("成功构建 PyTorch MLP 模型，结构如下：")
+    print("成功构建文献复现的 FCN 模型，结构如下：")
     print(model)
 
     # 打印模型参数数量

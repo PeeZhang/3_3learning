@@ -1,24 +1,24 @@
 # -----------------------------------------------------------------------------
-# 数据集生成脚本: 大面积随机形状 (create_dataset_large_area.py)
+# 数据集生成脚本: 空白初始数据 (create_dataset_baseline.py)
 # 
 # 【v12 核心集成版】
 # 功能:
-# 1. 生成指定数量的样本。
-# 2. 对每个样本，通过“斑块生长”算法生成一个大面积、连续、形状不规则的高电导率区域。
+# 1. 生成指定数量的“无压力”状态下的样本。
+# 2. 在这些样本中，整个材料的电导率是均匀的（带有微小的随机噪声）。
 # 3. 对每个生成的电导率分布图(Y)，调用已验证的有限元求解器计算出对应的15维电阻向量(X)。
 # 4. 将所有生成的 (X, Y) 数据对，分别保存到 X_data.npy 和 Y_data.npy 文件中。
 #
 # 使用方法:
-# 1. 将此脚本放置在 'dataset/large_area/' 目录下。
-# 2. 确保 'structured_mesh_grid_new/' 文件夹与 'large_area' 文件夹在同一级目录下。
-# 3. 运行此脚本: python create_dataset_large_area.py
+# 1. 创建一个新的文件夹 'dataset/baseline/'。
+# 2. 将此脚本放置在 'dataset/baseline/' 目录下。
+# 3. 确保 'structured_mesh_grid_new/' 文件夹与 'baseline' 文件夹在同一级目录下。
+# 4. 运行此脚本: python create_dataset_baseline.py
 # -----------------------------------------------------------------------------
 
 # 导入必要的库
 import numpy as np
 import meshio
 import os
-import random
 import tqdm  # 引入 tqdm 来显示进度条
 
 # 显式地从 skfem 的不同模块中导入所有需要的类和函数
@@ -34,14 +34,10 @@ from scipy.sparse.linalg import spsolve
 
 # a) 数据集相关参数
 OUTPUT_DIR = "."  # 将输出目录设为当前文件夹
-TOTAL_SAMPLES_TO_GENERATE = 1000 # 您期望生成的样本总数
+TOTAL_SAMPLES_TO_GENERATE = 500 # 生成100条空白数据
 
-# 【新】定义大面积“斑块”的面积（所占微元数量）范围
-AREA_SIZE_RANGE = (40, 100) # 每个样本的受压面积在40到100个微元之间随机
-
-# b) 物理模型和有限元模型参数 (与之前保持一致)
-BASE_CONDUCTIVITY = 1.0
-CONDUCTIVITY_RATIO_RANGE = (2.0, 20.0)
+# b) 物理模型和有限元模型参数
+BASE_CONDUCTIVITY = 1.0  # 未受压区域的基准电导率
 MESH_DIR = "../structured_mesh_grid_new"
 MESH_FILENAME = "material_mesh_3d.msh"
 NODES_FILENAME = "electrode_nodes.npz"
@@ -54,7 +50,7 @@ MEASUREMENT_PAIRS = [
     ('bottom_1', 'bottom_2'), ('bottom_2', 'bottom_3'), ('bottom_1', 'bottom_3'),
 ]
 
-# d) 网格几何参数 (必须与网格生成脚本完全一致)
+# d) 网格几何参数
 NX, NY, NZ = 12, 12, 1
 TOTAL_ELEMENTS = NX * NY * NZ
 
@@ -69,65 +65,16 @@ def stiffness(u, v, w):
     """
     return w.sigma * dot(grad(u), grad(v))
 
-def get_neighbors(index, width, height):
-    """根据一维索引，计算其在二维网格中的邻居（上下左右）的一维索引"""
-    neighbors = []
-    x, y = index % width, index // width
-    # 上
-    if y > 0: neighbors.append(index - width)
-    # 下
-    if y < height - 1: neighbors.append(index + width)
-    # 左
-    if x > 0: neighbors.append(index - 1)
-    # 右
-    if x < width - 1: neighbors.append(index + 1)
-    return neighbors
-
-def create_random_large_area_map():
+def create_baseline_conductivity_map():
     """
-    通过“斑块生长”算法，生成一个具有大面积、随机形状高电导率区域的电导率图。
+    生成一个均匀的、无任何异常区域的电导率分布图。
     
     Returns:
         numpy.ndarray: 一个144维的向量，代表每个微元的电导率。
     """
-    # a. 初始化背景
+    # 初始化电导率图，只包含带有微小随机扰动的背景值
     sigma_bg = BASE_CONDUCTIVITY + np.random.uniform(-0.05, 0.05)
     conductivity_map = np.full(TOTAL_ELEMENTS, sigma_bg)
-    
-    # b. 随机决定目标面积和电导率
-    target_area = np.random.randint(AREA_SIZE_RANGE[0], AREA_SIZE_RANGE[1] + 1)
-    ratio = np.random.uniform(*CONDUCTIVITY_RATIO_RANGE)
-    sigma_pressed = sigma_bg * ratio
-    
-    # c. 执行“斑块生长”算法
-    #   i. 随机选择一个起始“种子”点
-    seed_index = np.random.randint(0, TOTAL_ELEMENTS)
-    blob = {seed_index}
-    conductivity_map[seed_index] = sigma_pressed
-    
-    #   ii. 将所有可以扩张的邻居放入一个“边界”列表
-    frontier = get_neighbors(seed_index, NX, NY)
-    
-    #   iii. 循环生长，直到达到目标面积
-    while len(blob) < target_area and frontier:
-        # 从边界中随机选择一个点进行扩张
-        chosen_neighbor = random.choice(frontier)
-        frontier.remove(chosen_neighbor)
-        
-        # 如果这个点已经是斑块的一部分，就跳过
-        if chosen_neighbor in blob:
-            continue
-            
-        # 将新点加入斑块，并更新电导率图
-        blob.add(chosen_neighbor)
-        conductivity_map[chosen_neighbor] = sigma_pressed
-        
-        # 将这个新点的邻居加入到边界列表中，以备下一步扩张
-        new_neighbors = get_neighbors(chosen_neighbor, NX, NY)
-        for neighbor in new_neighbors:
-            if neighbor not in blob:
-                frontier.append(neighbor)
-                
     return conductivity_map
 
 
@@ -208,10 +155,10 @@ if __name__ == "__main__":
     Y_data_list = []
     
     # --- d. 主循环，生成数据 ---
-    print(f"开始生成 {TOTAL_SAMPLES_TO_GENERATE} 个大面积随机形状样本...")
+    print(f"开始生成 {TOTAL_SAMPLES_TO_GENERATE} 个空白（无压力）样本...")
     for i in tqdm.trange(TOTAL_SAMPLES_TO_GENERATE, desc="生成进度"):
-        # i. 生成一个随机的电导率图 (Y)
-        conductivity_map = create_random_large_area_map()
+        # i. 生成一个均匀的电导率图 (Y)
+        conductivity_map = create_baseline_conductivity_map()
         
         # ii. 调用求解器，计算对应的电阻向量 (X)
         resistance_vector = solve_fem_for_map(conductivity_map, basis, electrode_nodes)
