@@ -32,11 +32,18 @@ from model import FCNModel
 
 # a) 数据集相关参数
 DATASET_BASE_DIR = "dataset"
-DATASET_CATEGORIES = ["gaussian_gradient"]
-# DATASET_CATEGORIES = ["single_point", "multi_point", "random_pixels", "large_area", "gaussian_gradient"]
+# DATASET_CATEGORIES = ["gaussian_gradient"]
+# DATASET_CATEGORIES = ["single_point"]
+# DATASET_CATEGORIES = ["multi_point"]
+# DATASET_CATEGORIES = ["large_area"]
+# DATASET_CATEGORIES = ["gaussian_gradient", "baseline"]
+# DATASET_CATEGORIES = ["single_point", "baseline"]
+# DATASET_CATEGORIES = ["single_point", "gaussian_gradient", "baseline"]
+DATASET_CATEGORIES = ["single_point", "multi_point", "baseline", "gaussian_gradient"]
+# DATASET_CATEGORIES = ["single_point", "multi_point", "random_pixels", "large_area", "gaussian_gradient", "baseline"]
 
 # b) 训练相关参数
-EPOCHS = 10000
+EPOCHS = 5000
 BATCH_SIZE = 128
 VALIDATION_SPLIT = 0.2
 LEARNING_RATE = 0.01
