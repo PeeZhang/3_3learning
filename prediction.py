@@ -35,11 +35,11 @@ except ImportError:
 # --- 1. 参数和文件路径定义 ---
 # =============================================================================
 # 模型路径
-MODEL_PATH = './single_multi_gaussian_baseline/fcn_model_replicated.pth' 
+MODEL_PATH = './leakage_normal/fcn_model_replicated.pth' 
 
 # 【新】定义要加载的数据集类别
 DATASET_BASE_DIR = "./dataset/"
-DATASET_CATEGORIES = ["baseline", "single_point", "multi_point", "gaussian_gradient"] # 您可以选择一个或多个类别
+DATASET_CATEGORIES = ["normal", "leakage"] # 您可以选择一个或多个类别
 
 # 可视化参数
 NUM_SAMPLES_TO_VISUALIZE = 5  # 您希望可视化多少个样本

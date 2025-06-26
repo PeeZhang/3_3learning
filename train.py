@@ -39,7 +39,8 @@ DATASET_BASE_DIR = "dataset"
 # DATASET_CATEGORIES = ["gaussian_gradient", "baseline"]
 # DATASET_CATEGORIES = ["single_point", "baseline"]
 # DATASET_CATEGORIES = ["single_point", "gaussian_gradient", "baseline"]
-DATASET_CATEGORIES = ["single_point", "multi_point", "baseline", "gaussian_gradient"]
+# DATASET_CATEGORIES = ["single_point", "multi_point", "baseline", "gaussian_gradient"]
+DATASET_CATEGORIES = ["leakage", "normal"]
 # DATASET_CATEGORIES = ["single_point", "multi_point", "random_pixels", "large_area", "gaussian_gradient", "baseline"]
 
 # b) 训练相关参数
